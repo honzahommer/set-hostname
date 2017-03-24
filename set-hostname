@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+
+{ # this ensures the entire script is downloaded #
+
+# Some commands
+CMND_WHICH="/usr/bin/which"
+CMND_LOGGER="`$CMND_WHICH logger`"
+CMND_HOSTNAME="`$CMND_WHICH hostname`"
+
+# Logger global options
+LOGGER_TAG=${0##*/}
+LOGGER_PID=$PPID
+
+# Return codes (Nagios compatible)
+CODE_OK=0
+CODE_WARNING=1
+CODE_CRITICAL=2
+CODE_UNKNOWN=3
+CODE_DEPENDENT=4
+
+# function usg()  # print usage and exit
+# usage: usg
+#
+function usg {
+  cat <<EOF
+Usage: $0 fqdn-hostname [aliases]...
+
+Set Linux machine hostname permanently.
+
+fqdn-hostname  Hostname with domain.
+aliases        Machine aliases.
+EOF
+  exit 0
+}
+
+# function has()     # check if command exists
+# usage: has command...
+#
+function has {
+  local CMND
+
+  for CMND in "$@" ; do
+    type "$1" > /dev/null 2>&1 || \
+      out $CODE_UNKNOWN Unknown: file $CMND is not found or not executable
+  done
+}
+
+# function out()     # output optional message and exit with coode
+# usage: out exitcode [message]
+#
+function out {
+  local MESSAGE="${@:2}"
+
+  if [ -n "$MESSAGE" ] ; then
+    has "$CMND_LOGGER" && \
+      $CMND_LOGGER -t $LOGGER_TAG[$LOGGER_PID] $MESSAGE && \
+      echo "$MESSAGE" | awk -F': ' '{ printf "%s - %s. %s.", toupper($1), $2, $3 }'
+  fi
+
+  exit ${1:-0}
+}
+
+# function run()     # change linux machine hostname
+# usage: run fqdn-hostname [aliases]...
+#
+function run {
+  case "$1" in
+    --help|'')
+      usg
+      ;;
+  esac
+
+  local HOSTNAME_OLD_F="`hostname -f`"
+  local HOSTNAME_OLD_D="`hostname -d`"
+  local HOSTNAME_OLD_S="`hostname -s`"
+  local HOSTNAME_OLD_A="`hostname -a`"
+
+  local HOSTNAME_NEW_F="${1}"
+  local HOSTNAME_NEW_D="`echo ${HOSTNAME_NEW_F} | cut -d '.' -f2-`"
+  local HOSTNAME_NEW_S="`echo ${HOSTNAME_NEW_F} | cut -d '.' -f1`"
+  local HOSTNAME_NEW_A="${HOSTNAME_NEW_S} ${@:2}"
+
+  local HOSTNAMES_ADDR="127.0.1.1"
+  local HOSTNAMES_LIST="${HOSTNAME_NEW_F} ${HOSTNAME_NEW_A}"
+
+  # Run hostname command
+  $CMND_HOSTNAME "${HOSTNAME_NEW_S}"
+
+  # Write new hostname to hostname file
+  echo "${HOSTNAME_NEW_S}" > /etc/hostname
+
+  # Append note and new hostname into hosts file
+  grep -q "^${HOSTNAMES_ADDR}" /etc/hosts && \
+    sed -i "s/^\(${HOSTNAMES_ADDR}\).*/\1\t${HOSTNAMES_LIST}/g" /etc/hosts || echo -e "\n${HOSTNAMES_ADDR}\t${HOSTNAMES_LIST}" >> /etc/hosts
+
+  out $CODE_OK Success: Hostname changed: New hostname is ${HOSTNAME_NEW_S}
+}
+
+
+# Check if commands exists
+has "$CMND_HOSTNAME"
+
+# Execute the magic!
+run $@
+
+} # this ensures the entire script is downloaded #
